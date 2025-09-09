@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # Simple OptiBot - no Redis/PostgreSQL dependencies
+  optibot-simple:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+      - MCP_SERVER_URL=http://host.docker.internal:3000
+    env_file:
+      - .env
+    volumes:
+      - ./temp_files:/app/temp_files
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

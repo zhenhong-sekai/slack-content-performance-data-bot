@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__spec-workflow__spec-workflow-guide",
+      "mcp__spec-workflow__get-steering-context",
+      "mcp__spec-workflow__get-template-context",
+      "WebSearch",
+      "mcp__spec-workflow__create-spec-doc",
+      "Bash(chmod:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:langchain-ai.github.io)",
+      "Bash(pkill:*)",
+      "Bash(python3:*)",
+      "Read(/private/tmp/slack_bot_files/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

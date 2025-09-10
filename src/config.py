@@ -42,8 +42,8 @@ class Settings(BaseSettings):
     mcp_server_url: str = Field(default="http://localhost:3000")
     mcp_server_timeout: int = Field(default=30, ge=5, le=300)
     
-    # Redis Configuration
-    redis_url: str = Field(default="redis://localhost:6379/0")
+    # Redis Configuration (Optional - not used in simple mode)
+    redis_url: Optional[str] = Field(default=None)
     redis_password: Optional[str] = Field(default=None)
     redis_max_connections: int = Field(default=10, ge=1, le=100)
     
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     @validator("redis_url")
     def validate_redis_url(cls, v):
         """Validate Redis URL format."""
-        if not v.startswith(("redis://", "rediss://")):
+        if v is not None and not v.startswith(("redis://", "rediss://")):
             raise ValueError("redis_url must start with 'redis://' or 'rediss://'")
         return v
     

@@ -1,5 +1,5 @@
 # Core FastAPI and ASGI server
-fastapi>=0.104.0
+fastapi==0.103.2
 uvicorn[standard]>=0.24.0
 gunicorn>=21.2.0
 

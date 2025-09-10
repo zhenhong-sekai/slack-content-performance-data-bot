@@ -2,7 +2,7 @@ se name: Deploy OptiBot to ECS
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, ci-cd-clean ]
   pull_request:
     branches: [ main ]
 

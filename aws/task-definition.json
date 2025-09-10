@@ -9,10 +9,12 @@
     {
       "name": "optibot",
       "image": "${ECR_REPOSITORY_URI}:latest",
+      "cpu": 0,
       "essential": true,
       "portMappings": [
         {
           "containerPort": 8000,
+          "hostPort": 8000,
           "protocol": "tcp"
         }
       ],
@@ -28,28 +30,10 @@
         {
           "name": "LOG_LEVEL",
           "value": "INFO"
-        },
-        {
-          "name": "SLACK_BOT_TOKEN",
-          "value": "${SLACK_BOT_TOKEN}"
-        },
-        {
-          "name": "SLACK_APP_TOKEN",
-          "value": "${SLACK_APP_TOKEN}"
-        },
-        {
-          "name": "SLACK_SIGNING_SECRET",
-          "value": "${SLACK_SIGNING_SECRET}"
-        },
-        {
-          "name": "OPENAI_API_KEY",
-          "value": "${OPENAI_API_KEY}"
-        },
-        {
-          "name": "MCP_SERVER_URL",
-          "value": "${MCP_SERVER_URL}"
         }
       ],
+      "mountPoints": [],
+      "volumesFrom": [],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
@@ -64,7 +48,10 @@
         "timeout": 5,
         "retries": 3,
         "startPeriod": 60
-      }
+      },
+      "systemControls": []
     }
-  ]
+  ],
+  "volumes": [],
+  "placementConstraints": []
 }

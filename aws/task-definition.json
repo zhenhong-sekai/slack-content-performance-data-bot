@@ -9,6 +9,7 @@
     {
       "name": "optibot",
       "image": "${ECR_REPOSITORY_URI}:latest",
+      "command": ["python", "run-simple.py"],
       "cpu": 0,
       "essential": true,
       "portMappings": [
@@ -30,7 +31,7 @@
         {
           "name": "LOG_LEVEL",
           "value": "INFO"
-        }
+        },
       ],
       "mountPoints": [],
       "volumesFrom": [],
@@ -43,7 +44,7 @@
         }
       },
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "command": ["CMD-SHELL", "python -c 'import asyncio; from src.services.slack_socket_simple import get_simple_slack_service; asyncio.run(get_simple_slack_service().initialize())' || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,

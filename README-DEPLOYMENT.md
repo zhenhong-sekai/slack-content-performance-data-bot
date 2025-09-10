@@ -7,7 +7,7 @@ This guide covers deploying OptiBot to AWS ECS using CI/CD with GitHub Actions.
 1. **AWS Account** with appropriate permissions
 2. **ECR Repository** named `optibot`
 3. **ECS Cluster** named `optibot-cluster`
-4. **ECS Service** named `optibot-service`
+4. **ECS Service** named `optibot-task-service-hxwtet44`
 5. **ECS Task Definition** named `optibot-task`
 6. **GitHub Repository** with Actions enabled
 
@@ -61,7 +61,7 @@ Create the ECS service (if not already created):
 ```bash
 aws ecs create-service \
   --cluster optibot-cluster \
-  --service-name optibot-service \
+  --service-name optibot-task-service-hxwtet44 \
   --task-definition optibot-task \
   --desired-count 1 \
   --launch-type FARGATE \
@@ -102,7 +102,7 @@ Run the deployment script:
 ```bash
 aws ecs describe-services \
   --cluster optibot-cluster \
-  --services optibot-service \
+  --services optibot-task-service-hxwtet44 \
   --region us-east-1
 ```
 
@@ -129,13 +129,13 @@ aws ecs describe-services \
 
 ```bash
 # Check service status
-aws ecs describe-services --cluster optibot-cluster --services optibot-service
+aws ecs describe-services --cluster optibot-cluster --services optibot-task-service-hxwtet44
 
 # View task logs
 aws logs get-log-events --log-group-name /ecs/optibot --log-stream-name ecs/optibot/task-id
 
 # List running tasks
-aws ecs list-tasks --cluster optibot-cluster --service-name optibot-service
+aws ecs list-tasks --cluster optibot-cluster --service-name optibot-task-service-hxwtet44
 ```
 
 ## Security Considerations

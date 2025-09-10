@@ -7,7 +7,7 @@ set -e
 AWS_REGION="us-east-1"
 ECR_REPOSITORY="optibot"
 ECS_CLUSTER="optibot-cluster"
-ECS_SERVICE="optibot-service"
+ECS_SERVICE="optibot-task-service-hxwtet44"
 ECS_TASK_DEFINITION="optibot-task"
 CONTAINER_NAME="optibot"
 

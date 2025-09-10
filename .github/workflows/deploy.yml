@@ -1,4 +1,4 @@
-name: Deploy OptiBot to ECS
+se name: Deploy OptiBot to ECS
 
 on:
   push:
@@ -13,7 +13,6 @@ env:
   ECS_CLUSTER: optibot-cluster
   ECS_TASK_DEFINITION: optibot-task
   CONTAINER_NAME: optibot
-
 jobs:
   deploy:
     name: Deploy

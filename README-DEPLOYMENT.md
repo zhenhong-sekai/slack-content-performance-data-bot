@@ -45,49 +45,16 @@ Add the following secrets to your GitHub repository:
 ```
 AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+SLACK_SIGNING_SECRET=your-signing-secret
+MCP_SERVER_URL=http://your-mcp-server:3000
+OPENAI_API_KEY=sk-your-openai-api-key
 ```
 
-### 3. AWS Systems Manager Parameters
+**Note**: All sensitive configuration is now stored in GitHub Secrets and automatically injected into the ECS task during deployment.
 
-Store your sensitive configuration in AWS Systems Manager Parameter Store:
-
-```bash
-# Slack Bot Token
-aws ssm put-parameter \
-  --name "/optibot/slack-bot-token" \
-  --value "xoxb-your-bot-token" \
-  --type "SecureString" \
-  --region us-east-1
-
-# Slack App Token
-aws ssm put-parameter \
-  --name "/optibot/slack-app-token" \
-  --value "xapp-your-app-token" \
-  --type "SecureString" \
-  --region us-east-1
-
-# Slack Signing Secret
-aws ssm put-parameter \
-  --name "/optibot/slack-signing-secret" \
-  --value "your-signing-secret" \
-  --type "SecureString" \
-  --region us-east-1
-
-# MCP Server URL
-aws ssm put-parameter \
-  --name "/optibot/mcp-server-url" \
-  --value "http://your-mcp-server:3000" \
-  --type "String" \
-  --region us-east-1
-```
-
-### 4. Update Task Definition
-
-1. Update `.aws/task-definition.json` with your AWS account ID
-2. Replace `YOUR_ACCOUNT_ID` with your actual AWS account ID
-3. Update the execution and task role ARNs if needed
-
-### 5. ECS Service Creation
+### 3. ECS Service Creation
 
 Create the ECS service (if not already created):
 
@@ -173,10 +140,11 @@ aws ecs list-tasks --cluster optibot-cluster --service-name optibot-service
 
 ## Security Considerations
 
-1. **Secrets Management**: All sensitive data is stored in AWS Systems Manager Parameter Store
+1. **Secrets Management**: All sensitive data is stored in GitHub Secrets and automatically injected during deployment
 2. **IAM Permissions**: Use least privilege principle for IAM roles
 3. **Network Security**: Configure security groups appropriately
 4. **Container Security**: Regularly update base images and dependencies
+5. **GitHub Secrets**: Ensure only authorized team members have access to repository secrets
 
 ## Cost Optimization
 

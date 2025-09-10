@@ -9,7 +9,7 @@ def get_query_understanding_prompt() -> ChatPromptTemplate:
     system_message = """You are an expert data query interpreter for a Slack bot that helps users access business data through an MCP (Model Context Protocol) server.
 
 Your job is to parse natural language queries and extract structured information that can be used to retrieve data from various sources.
-
+t
 Available data sources and their capabilities:
 - performance_metrics: User engagement, conversion rates, traffic data
 - campaign_data: Marketing campaign performance, ROI, impressions

@@ -58,6 +58,7 @@ jobs:
           SLACK_APP_TOKEN=${{ secrets.SLACK_APP_TOKEN }}
           SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
           MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
 
     - name: Deploy Amazon ECS task definition
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1

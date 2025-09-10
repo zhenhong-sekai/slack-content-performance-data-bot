@@ -49,6 +49,7 @@ SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_APP_TOKEN=xapp-your-app-token
 SLACK_SIGNING_SECRET=your-signing-secret
 MCP_SERVER_URL=http://your-mcp-server:3000
+OPENAI_API_KEY=sk-your-openai-api-key
 ```
 
 **Note**: All sensitive configuration is now stored in GitHub Secrets and automatically injected into the ECS task during deployment.

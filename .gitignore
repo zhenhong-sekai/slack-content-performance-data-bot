@@ -177,3 +177,7 @@ prometheus_data/
 .env.development
 .env.test
 .env.production
+
+# Task definitions with secrets
+optibot-task-definition.json
+*-task-definition.json

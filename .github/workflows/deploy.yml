@@ -1,4 +1,4 @@
-se name: Deploy OptiBot to ECS
+name: Deploy OptiBot to ECS
 
 on:
   push:

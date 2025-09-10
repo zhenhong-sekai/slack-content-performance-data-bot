@@ -4,6 +4,7 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
   "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::010526279899:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "optibot",

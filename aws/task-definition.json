@@ -27,28 +27,26 @@
         {
           "name": "LOG_LEVEL",
           "value": "INFO"
-        }
-      ],
-      "secrets": [
+        },
         {
           "name": "SLACK_BOT_TOKEN",
-          "valueFrom": "${SLACK_BOT_TOKEN_ARN}"
+          "value": "${SLACK_BOT_TOKEN}"
         },
         {
           "name": "SLACK_APP_TOKEN",
-          "valueFrom": "${SLACK_APP_TOKEN_ARN}"
+          "value": "${SLACK_APP_TOKEN}"
         },
         {
           "name": "SLACK_SIGNING_SECRET",
-          "valueFrom": "${SLACK_SIGNING_SECRET_ARN}"
+          "value": "${SLACK_SIGNING_SECRET}"
         },
         {
           "name": "OPENAI_API_KEY",
-          "valueFrom": "${OPENAI_API_KEY_ARN}"
+          "value": "${OPENAI_API_KEY}"
         },
         {
           "name": "MCP_SERVER_URL",
-          "valueFrom": "${MCP_SERVER_URL_ARN}"
+          "value": "${MCP_SERVER_URL}"
         }
       ],
       "logConfiguration": {
@@ -67,7 +65,5 @@
         "startPeriod": 60
       }
     }
-  ],
-  "executionRoleArn": "${ECS_EXECUTION_ROLE_ARN}",
-  "taskRoleArn": "${ECS_TASK_ROLE_ARN}"
+  ]
 }

@@ -49,12 +49,7 @@ COPY --chown=appuser:appuser . .
 # Switch to non-root user
 USER appuser
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
-    CMD curl -f http://localhost:8000/health/live || exit 1
+# No health check or port exposure needed for Socket Mode application
 
-# Expose port
-EXPOSE 8000
-
-# Default command
-CMD ["gunicorn", "src.main:app", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--worker-connections", "1000", "--max-requests", "1000", "--max-requests-jitter", "100", "--timeout", "120", "--log-level", "info"]
+# Default command - use simple runner without Redis dependencies
+CMD ["python", "run-simple.py"]

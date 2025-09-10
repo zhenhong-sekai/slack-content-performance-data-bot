@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
+# from langgraph.prebuilt import ToolNode  # Temporarily disabled due to version compatibility
 from pydantic import BaseModel, Field
 
 from src.config import settings
@@ -41,147 +42,95 @@ class AgentState(TypedDict):
     thread_ts: Optional[str]
 
 
-# Create MCP tools using direct function definitions
-async def list_tables_func() -> str:
-    """List available tables in BigQuery."""
-    try:
-        client = MultiServerMCPClient({
-            "bigquery_sse": {
-                "url": settings.mcp_server_url,
-                "transport": "streamable_http",
-            }
-        })
-        
-        tools = await client.get_tools()
-        list_tables_tool = None
-        
-        for tool_obj in tools:
-            if hasattr(tool_obj, 'name') and tool_obj.name == 'list_tables':
-                list_tables_tool = tool_obj
-                break
-        
-        if list_tables_tool:
-            result = await list_tables_tool.ainvoke({})
-            return str(result)
-        else:
-            return "list_tables tool not found in MCP server"
-            
-    except Exception as e:
-        logger.error("Failed to list tables", error=str(e))
-        return f"Error listing tables: {str(e)}"
+# Global MCP client instance
+_mcp_client: Optional[MultiServerMCPClient] = None
 
 
-async def describe_table_func(table_name: str) -> str:
-    """Describe the structure of a specific table.
+async def get_mcp_client() -> MultiServerMCPClient:
+    """Get or create MCP client instance with proper connection to BigQuery server."""
+    global _mcp_client
     
-    Args:
-        table_name: Name of the table to describe
-    """
-    try:
-        client = MultiServerMCPClient({
-            "bigquery_sse": {
+    if _mcp_client is None:
+        logger.info("Initializing MCP client", server_url=settings.mcp_server_url)
+        _mcp_client = MultiServerMCPClient({
+            "bigquery": {
                 "url": settings.mcp_server_url,
                 "transport": "streamable_http",
             }
         })
         
-        tools = await client.get_tools()
-        describe_tool = None
-        
-        for tool_obj in tools:
-            if hasattr(tool_obj, 'name') and tool_obj.name == 'describe_table':
-                describe_tool = tool_obj
-                break
-        
-        if describe_tool:
-            result = await describe_tool.ainvoke({"table_name": table_name})
-            return str(result)
-        else:
-            return "describe_table tool not found in MCP server"
-            
-    except Exception as e:
-        logger.error("Failed to describe table", table_name=table_name, error=str(e))
-        return f"Error describing table {table_name}: {str(e)}"
-
-
-async def execute_query_func(sql_query: str) -> str:
-    """Execute a SQL query against BigQuery.
+        # Test connection and log available tools
+        try:
+            tools = await _mcp_client.get_tools()
+            tool_names = [tool.name for tool in tools if hasattr(tool, 'name')]
+            logger.info("MCP client initialized successfully", 
+                       server_url=settings.mcp_server_url,
+                       available_tools=tool_names)
+        except Exception as e:
+            logger.error("Failed to connect to MCP server", 
+                        server_url=settings.mcp_server_url, 
+                        error=str(e))
+            raise
     
-    Args:
-        sql_query: The SQL query to execute
-    """
+    return _mcp_client
+
+
+def save_as_csv_local(data: Any, filename: str) -> Dict[str, Any]:
+    """Save data as CSV file locally."""
     try:
-        client = MultiServerMCPClient({
-            "bigquery_sse": {
-                "url": settings.mcp_server_url,
-                "transport": "streamable_http",
-            }
-        })
+        logger.info("Creating CSV file", filename=filename)
         
-        tools = await client.get_tools()
-        execute_tool = None
+        # Create CSV file
+        temp_dir = settings.temp_file_path
+        os.makedirs(temp_dir, exist_ok=True)
         
-        for tool_obj in tools:
-            if hasattr(tool_obj, 'name') and tool_obj.name == 'execute_query':
-                execute_tool = tool_obj
-                break
+        filepath = os.path.join(temp_dir, filename)
         
-        if execute_tool:
-            result = await execute_tool.ainvoke({"sql_query": sql_query})
-            return str(result)
-        else:
-            return "execute_query tool not found in MCP server"
-            
+        # Handle different data structures
+        df = None
+        if isinstance(data, pd.DataFrame):
+            df = data
+        elif isinstance(data, list):
+            if data:
+                df = pd.DataFrame(data)
+            else:
+                return {"success": False, "error": "No data to save - empty result set"}
+        elif isinstance(data, dict):
+            if "error" in data:
+                return {"success": False, "error": f"Cannot create CSV: {data.get('error', 'Unknown error')}"}
+            if "rows" in data:
+                if data["rows"]:
+                    df = pd.DataFrame(data["rows"])
+                else:
+                    return {"success": False, "error": "No data to save - empty result set"}
+            elif "data" in data:
+                if data["data"]:
+                    df = pd.DataFrame(data["data"])
+                else:
+                    return {"success": False, "error": "No data to save - empty result set"}
+            else:
+                df = pd.DataFrame([data])
+        
+        if df is None or df.empty:
+            return {"success": False, "error": "No data to save - empty result set"}
+        
+        # Save to CSV
+        df.to_csv(filepath, index=False)
+        
+        logger.info("CSV file created", filename=filename, rows=len(df), columns=len(df.columns))
+        
+        return {
+            "success": True,
+            "filename": filename,
+            "filepath": filepath,
+            "rows": len(df),
+            "columns": list(df.columns)
+        }
+        
     except Exception as e:
-        logger.error("Failed to execute query", sql_query=sql_query[:100], error=str(e))
-        
-        # Auto-fix datetime serialization issues
-        if "not JSON serializable" in str(e) and "datetime" in str(e):
-            logger.info("Attempting to fix datetime serialization issue")
-            
-            # Common datetime column names to fix
-            datetime_columns = ['event_timestamp', 'created_at', 'updated_at', 'timestamp', 'date']
-            
-            fixed_query = sql_query
-            for col in datetime_columns:
-                if col in sql_query.lower():
-                    # Replace with CAST AS STRING
-                    import re
-                    pattern = rf'\b{col}\b'
-                    replacement = f'CAST({col} AS STRING) AS {col}'
-                    fixed_query = re.sub(pattern, replacement, fixed_query, flags=re.IGNORECASE)
-            
-            if fixed_query != sql_query:
-                logger.info("Retrying query with datetime casting", original=sql_query[:100], fixed=fixed_query[:100])
-                try:
-                    result = await execute_tool.ainvoke({"sql_query": fixed_query})
-                    return str(result)
-                except Exception as retry_error:
-                    logger.error("Fixed query also failed", error=str(retry_error))
-                    return f"Query failed even after datetime fix: {str(retry_error)}"
-        
-        return f"Error executing query: {str(e)}"
-
-# Create tool objects manually
-from langchain_core.tools import Tool, StructuredTool
-
-list_tables = StructuredTool.from_function(
-    func=list_tables_func,
-    name="list_tables",
-    description="List available tables in BigQuery"
-)
-
-describe_table = StructuredTool.from_function(
-    func=describe_table_func,
-    name="describe_table", 
-    description="Describe the structure of a specific table"
-)
-
-execute_query = StructuredTool.from_function(
-    func=execute_query_func,
-    name="execute_query",
-    description="Execute a SQL query against BigQuery"
-)
+        error_msg = f"Failed to create CSV: {str(e)}"
+        logger.error("CSV creation failed", error=error_msg)
+        return {"success": False, "error": error_msg}
 
 
 @tool
@@ -189,62 +138,36 @@ def save_as_csv(json_data: str) -> str:
     """Save JSON data as CSV file for download.
     
     Args:
-        json_data: JSON string containing the data to save
+        json_data: JSON string containing the data to save as CSV
     """
     try:
-        logger.info("Creating CSV file", data_preview=json_data[:200])
+        import json
+        logger.info("Creating CSV file from JSON data", data_preview=json_data[:200])
         
         # Parse JSON data
         data = json.loads(json_data)
         
-        # Handle different data structures
-        df = None
-        if isinstance(data, list):
-            if data:
-                df = pd.DataFrame(data)
-            else:
-                return "No data to save - empty result set"
-        elif isinstance(data, dict):
-            if "error" in data:
-                return f"Cannot create CSV: {data.get('error', 'Unknown error')}"
-            if "rows" in data:
-                if data["rows"]:
-                    df = pd.DataFrame(data["rows"])
-                else:
-                    return "No data to save - empty result set"
-            elif "data" in data:
-                if data["data"]:
-                    df = pd.DataFrame(data["data"])
-                else:
-                    return "No data to save - empty result set"
-            else:
-                df = pd.DataFrame([data])
-        
-        if df is None or df.empty:
-            return "No data to save - empty result set"
-        
-        # Create CSV file
+        # Create filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"query_results_{timestamp}.csv"
-        temp_dir = settings.temp_file_path
-        os.makedirs(temp_dir, exist_ok=True)
         
-        filepath = os.path.join(temp_dir, filename)
-        df.to_csv(filepath, index=False)
+        # Use the local CSV creation function
+        result = save_as_csv_local(data, filename)
         
-        logger.info("CSV file created", filename=filename, rows=len(df), columns=len(df.columns))
-        
-        return f"SUCCESS: Created {filename} with {len(df)} rows and {len(df.columns)} columns"
+        if result["success"]:
+            return f"SUCCESS: Created {result['filename']} with {result['rows']} rows and {len(result['columns'])} columns"
+        else:
+            return f"ERROR: {result['error']}"
         
     except Exception as e:
         error_msg = f"Failed to create CSV: {str(e)}"
-        logger.error("CSV creation failed", error=error_msg)
+        logger.error("CSV tool failed", error=error_msg)
         return error_msg
 
 
 # Define the ReAct agent
 class LangGraphReActAgent:
-    """Modern LangGraph ReAct agent with structured outputs."""
+    """Modern LangGraph ReAct agent with MCP tools integration."""
     
     def __init__(self):
         self.llm = ChatOpenAI(
@@ -254,21 +177,46 @@ class LangGraphReActAgent:
             temperature=0.1,
         )
         
-        
-        # Define tools
-        self.tools = [list_tables, describe_table, execute_query, save_as_csv]
-        self.tool_map = {tool.name: tool for tool in self.tools}
-        
-        # Build the graph
-        self.graph = self._build_graph()
+        # MCP client will be initialized async
+        self.mcp_client = None
+        self.tools = []
+        self.tool_node = None
+        self.graph = None
     
-    def _build_graph(self) -> StateGraph:
-        """Build the ReAct agent graph."""
+    async def initialize(self):
+        """Initialize MCP client and build the graph."""
+        try:
+            # Get MCP client with discovered tools
+            self.mcp_client = await get_mcp_client()
+            mcp_tools = await self.mcp_client.get_tools()
+            
+            # Combine MCP tools with local CSV tool
+            self.tools = list(mcp_tools) + [save_as_csv]
+            
+            # Create tool execution function (custom implementation due to version compatibility)
+            self.tool_node = self._execute_mcp_tools
+            
+            # Build the graph
+            self.graph = await self._build_graph()
+            
+            logger.info("LangGraph ReAct agent initialized", 
+                       tool_count=len(self.tools),
+                       tool_names=[tool.name for tool in self.tools if hasattr(tool, 'name')])
+            
+        except Exception as e:
+            logger.error("Failed to initialize LangGraph ReAct agent", error=str(e))
+            raise
+    
+    async def _build_graph(self) -> StateGraph:
+        """Build the ReAct agent graph with MCP tools."""
         workflow = StateGraph(AgentState)
+        
+        # Create the agent node with MCP tools bound to LLM
+        llm_with_tools = self.llm.bind_tools(self.tools)
         
         # Add nodes
         workflow.add_node("agent", self._agent_node)
-        workflow.add_node("tools", self._execute_tools)
+        workflow.add_node("tools", self.tool_node)  # Use LangGraph's ToolNode with MCP tools
         workflow.add_node("process_results", self._process_results)
         
         # Add edges
@@ -278,7 +226,7 @@ class LangGraphReActAgent:
             self._should_continue,
             {
                 "continue": "tools",
-                "process": "process_results",
+                "process": "process_results", 
                 "end": END,
             },
         )
@@ -288,37 +236,239 @@ class LangGraphReActAgent:
         return workflow.compile()
     
     async def _agent_node(self, state: AgentState) -> AgentState:
-        """Main agent reasoning node."""
+        """Main agent reasoning node with MCP tools."""
         try:
-            system_prompt = """You are OptiBot, a BigQuery data assistant.
+            # Get tool names dynamically from MCP
+            tool_names = [tool.name for tool in self.tools if hasattr(tool, 'name')]
+            
+            system_prompt = f"""You are OptiBot, a BigQuery data assistant with access to MCP tools.
 
-CRITICAL RULES:
-1. ALWAYS use tools in this order for data queries:
-   - list_tables: See available tables
-   - describe_table: Understand table structure  
-   - execute_query: Get the actual data
-   - save_as_csv: Create downloadable file (MANDATORY for all data requests)
+CRITICAL WORKFLOW:
+1. FIRST: Parse user query and COUNT all content IDs mentioned (e.g., "798651, 1028967, 1028956" = 3 IDs)
+2. For data queries, follow this sequence:
+   - First: List available tables to understand what data is available
+   - Then: Describe relevant table structures 
+   - Next: Execute SQL queries INCLUDING ALL CONTENT IDs - never skip any!
+   - MANDATORY: Use save_as_csv tool to convert JSON results to downloadable CSV file
+   
+BEFORE WRITING SQL: Count content IDs in user request and ensure your WHERE clause includes ALL of them!
 
-2. DATETIME FIX PROTOCOL:
-   If execute_query fails with "datetime is not JSON serializable":
-   - Identify datetime columns: event_timestamp, created_at, updated_at, timestamp, date
-   - Use CAST(column AS STRING) AS column format
-   - Example: SELECT user_id, CAST(event_timestamp AS STRING) AS event_timestamp FROM table
+CONTENT ID VALIDATION:
+- Use EXACT content IDs from user request - never modify, truncate, or guess them
+- For analytics tables: contentId is STRING, use quotes: IN ('943625', '939354')
+- For events table: sekai_id is INTEGER, no quotes: IN (943625, 939354)
+- If query returns empty results, check BOTH data sources before concluding no data exists
 
-3. CSV REQUIREMENT:
-   - ONLY call save_as_csv when execute_query returns actual data (not empty results)
-   - Pass the EXACT JSON returned by execute_query to save_as_csv
-   - Do NOT call save_as_csv for empty results or errors
+2. DATETIME SERIALIZATION FIX:
+   If you get "Object of type datetime is not JSON serializable" error:
+   - CAST all datetime columns to STRING in your SQL
+   - Common datetime columns: created_at, updated_at, timestamp, date, event_timestamp
+   - Example: SELECT CAST(created_at AS STRING) AS created_at, other_columns FROM table
+   - ALWAYS use CAST(datetime_column AS STRING) AS datetime_column format
 
-4. ERROR HANDLING:
+3. ALWAYS be helpful and provide clear explanations of what you're doing.
+
+4. CSV CREATION RULE:
+   - WHENEVER execute_query returns JSON data (even small amounts), you MUST call save_as_csv
+   - Pass the EXACT JSON string returned by execute_query to save_as_csv tool
+   - Do NOT skip CSV creation - users always want downloadable files
+   - Example: If execute_query returns JSON like [{{"user_id": 123, "event": "like"}}], call save_as_csv with that JSON
+
+5. ERROR HANDLING:
    - If tools fail, explain the issue clearly
    - Provide helpful suggestions for fixing queries
    - Always be professional and helpful
+   - If query returns empty results [], check if:
+     * Content IDs are correct and match user request exactly
+     * Data exists in other tables (analytics vs events)
+     * Date range is appropriate for available tables
+     * Table names are correct and exist
 
-Available tools: list_tables, describe_table, execute_query, save_as_csv
+TIPS FOR PERFORMANCE DATA:
+1. Use dwd.prod_sekai_all_event table for engagement metrics over date ranges
+2. Key metrics to aggregate:
+   - Daily unique users (COUNT DISTINCT user_id)
+   - Chat metrics (event_name = 'chat_sekai')
+   - Like metrics (event_name = 'like_sekai')
+
+BIGQUERY CONTENT PERFORMANCE DATA RETRIEVAL:
+
+CRITICAL QUERY RULES:
+1. ALWAYS check available tables first using list_tables
+2. Use EXACT content IDs provided by user - never modify or guess them
+3. Query BOTH data sources: analytics tables AND events table
+4. Handle data type differences: contentId (string) vs sekai_id (integer)
+5. Check data availability before querying - tables may not exist for recent dates
+
+Table Sources for Content Metrics:
+1. analytics_407461028.events_YYYYMMDD - Content-specific impression & click data
+2. dwd.prod_sekai_all_event - Chat & like interaction data
+
+QUERY WORKFLOW:
+1. First: List available tables to find most recent analytics tables
+2. Query analytics tables for impressions/clicks (may return empty results)
+3. Query events table for chat/likes (may have data even if analytics don't)
+4. Combine results from both sources
+
+Analytics Table Query (Impressions & Clicks):
+```sql
+SELECT 
+  param.value.string_value as content_id,
+  COUNT(DISTINCT user_pseudo_id) as daily_users,
+  COUNT(DISTINCT CASE WHEN event_name LIKE '%expose%' THEN user_pseudo_id END) as impression_uv,
+  COUNT(CASE WHEN event_name LIKE '%expose%' THEN 1 END) as impression_pv,
+  COUNT(DISTINCT CASE WHEN event_name LIKE '%click%' THEN user_pseudo_id END) as click_uv,
+  COUNT(CASE WHEN event_name LIKE '%click%' THEN 1 END) as click_pv,
+  COUNT(DISTINCT CASE WHEN event_name = 'sekai_page_click_send_message' THEN user_pseudo_id END) as chat_uv,
+  COUNT(CASE WHEN event_name = 'sekai_page_click_send_message' THEN 1 END) as chat_pv
+FROM analytics_407461028.events_YYYYMMDD,
+UNNEST(event_params) as param
+WHERE param.key = 'contentId'
+  AND param.value.string_value IS NOT NULL
+  AND param.value.string_value != ''
+  AND param.value.string_value IN ('CONTENT_IDS_HERE')
+GROUP BY content_id
+ORDER BY content_id
+```
+
+Event Data Table Query (Chat & Likes):
+```sql
+SELECT 
+  sekai_id,
+  COUNT(DISTINCT user_id) as daily_users,
+  COUNT(DISTINCT CASE WHEN event_name = 'chat_sekai' THEN user_id END) as chat_uv,
+  COUNT(CASE WHEN event_name = 'chat_sekai' THEN 1 END) as chat_pv,
+  COUNT(DISTINCT CASE WHEN event_name = 'like_sekai' THEN user_id END) as like_uv,
+  COUNT(CASE WHEN event_name = 'like_sekai' THEN 1 END) as like_pv
+FROM dwd.prod_sekai_all_event
+WHERE sekai_id IN (CONTENT_IDS_HERE)
+  AND DATE(event_timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+GROUP BY sekai_id
+ORDER BY sekai_id
+```
+
+Key Parameters:
+- Analytics: Use contentId (string) from event_params
+- Events: Use sekai_id (integer) as direct column
+- Date Format: Replace YYYYMMDD with actual date (e.g., 20250830)
+
+Available Event Types:
+- Impressions: foryou_page_expose_sekai_card, search_result_page_expose_roleplay, sekai_page_expose
+- Clicks: foryou_page_click_sekai_card, sekai_page_click_send_message, sekai_page_click_like
+- Chat: chat_sekai, sekai_page_click_send_message
+- Likes: like_sekai, sekai_page_click_like
+
+Usage Instructions:
+1. Replace CONTENT_IDS_HERE with comma-separated content IDs (use EXACT IDs from user)
+2. Replace YYYYMMDD with target date (check available tables first)
+3. Run both queries and combine results (even if one returns empty)
+4. Use CAST(event_timestamp AS STRING) to avoid datetime serialization errors
+
+EXAMPLE WORKFLOW:
+User requests: "Get data for content 943625"
+1. list_tables to find available analytics tables
+2. Query analytics_407461028.events_20250830 for contentId = '943625' (may return empty)
+3. Query dwd.prod_sekai_all_event for sekai_id = 943625 (may have chat data)
+4. Combine results showing 0 impressions/clicks, 1 chat PV/UV
+
+AGGREGATION EXAMPLES:
+
+1. Daily Breakdown:
+```sql
+SELECT 
+  FORMAT_DATE('%Y-%m-%d', DATE(event_timestamp)) as date,
+  COUNT(DISTINCT user_id) as daily_users,
+  COUNT(DISTINCT CASE WHEN event_name = 'chat_sekai' THEN user_id END) as chat_users,
+  COUNT(CASE WHEN event_name = 'chat_sekai' THEN 1 END) as chat_count,
+  COUNT(DISTINCT CASE WHEN event_name = 'like_sekai' THEN user_id END) as like_users,
+  COUNT(CASE WHEN event_name = 'like_sekai' THEN 1 END) as like_count
+FROM dwd.prod_sekai_all_event
+WHERE sekai_id = [ID]
+  AND DATE(event_timestamp) BETWEEN [START_DATE] AND [END_DATE]
+GROUP BY 1
+ORDER BY date DESC;
+```
+
+2. Period Summary:
+```sql
+SELECT 
+  MIN(DATE(event_timestamp)) as period_start,
+  MAX(DATE(event_timestamp)) as period_end,
+  COUNT(DISTINCT user_id) as total_unique_users,
+  COUNT(DISTINCT CASE WHEN event_name = 'chat_sekai' THEN user_id END) as total_chat_users,
+  COUNT(CASE WHEN event_name = 'chat_sekai' THEN 1 END) as total_chats,
+  COUNT(DISTINCT CASE WHEN event_name = 'like_sekai' THEN user_id END) as total_like_users,
+  COUNT(CASE WHEN event_name = 'like_sekai' THEN 1 END) as total_likes,
+  ROUND(COUNT(DISTINCT CASE WHEN event_name = 'chat_sekai' THEN user_id END) / 
+    COUNT(DISTINCT user_id) * 100, 1) as chat_user_ratio,
+  ROUND(COUNT(DISTINCT CASE WHEN event_name = 'like_sekai' THEN user_id END) / 
+    COUNT(DISTINCT user_id) * 100, 1) as like_user_ratio
+FROM dwd.prod_sekai_all_event
+WHERE sekai_id = [ID]
+  AND DATE(event_timestamp) BETWEEN [START_DATE] AND [END_DATE];
+```
+
+3. Multi-Content Analysis:
+```sql
+-- For multiple sekai_ids, use IN clause and GROUP BY sekai_id
+SELECT 
+  sekai_id,
+  FORMAT_DATE('%Y-%m-%d', DATE(event_timestamp)) as date,
+  COUNT(DISTINCT user_id) as daily_users,
+  COUNT(DISTINCT CASE WHEN event_name = 'chat_sekai' THEN user_id END) as chat_users,
+  COUNT(CASE WHEN event_name = 'chat_sekai' THEN 1 END) as chat_count,
+  COUNT(DISTINCT CASE WHEN event_name = 'like_sekai' THEN user_id END) as like_users,
+  COUNT(CASE WHEN event_name = 'like_sekai' THEN 1 END) as like_count
+FROM dwd.prod_sekai_all_event
+WHERE sekai_id IN (798651, 1028967, 1028956)
+  AND DATE(event_timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+GROUP BY sekai_id, date
+ORDER BY sekai_id, date DESC;
+```
+
+FEW-SHOT EXAMPLES:
+
+Query: "engagement data for content 798651, 1028967, 1028956 last 7 days"
+Response: I'll get engagement data for all three content IDs for the last 7 days.
+1. Use IN clause: WHERE sekai_id IN (798651, 1028967, 1028956)
+2. Use DATE_SUB for last 7 days: DATE(event_timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+3. GROUP BY sekai_id, date to separate each content by day
+
+Query: "performance data for content 123456 last 30 days"
+Response: I'll get performance data for content 123456 for the last 30 days.
+1. Single ID: WHERE sekai_id = 123456
+2. Use INTERVAL 30 DAY for date range
+
+Query: "daily breakdown for contents 111, 222, 333"
+Response: I'll provide daily breakdown for all three contents.
+1. Multiple IDs: WHERE sekai_id IN (111, 222, 333)
+2. Include sekai_id in SELECT to distinguish between contents
+3. Generate comprehensive daily breakdown with all metrics
+
+CRITICAL MULTI-CONTENT RULES:
+- When user provides MULTIPLE content IDs (like 798651, 1028967, 1028956), you MUST include ALL of them
+- COUNT all IDs mentioned: If user says "798651, 1028967, 1028956" that's exactly 3 IDs
+- VERIFY in your SQL: WHERE sekai_id IN (798651, 1028967, 1028956) - all 3 IDs must be there
+- DO NOT truncate or skip any IDs - include every single one mentioned by the user
+- Double-check your WHERE clause contains the complete list
+
+EXAMPLE VERIFICATION:
+User asks: "data for 798651, 1028967, 1028956, 1234567, 9876543"
+Your SQL MUST have: WHERE sekai_id IN (798651, 1028967, 1028956, 1234567, 9876543)
+Count: 5 IDs requested = 5 IDs in query ✓
+
+Remember:
+- For MULTIPLE content IDs: Use IN clause and include sekai_id in SELECT and GROUP BY
+- ALWAYS include ALL content IDs mentioned by the user - never skip any
+- For date ranges: Use DATE_SUB(CURRENT_DATE(), INTERVAL X DAY) format
+- ALWAYS provide both daily breakdown and period summary for better insights
+- Use FORMAT_DATE for datetime columns to avoid serialization errors
+- Generate CSV files for both aggregated views
+
+Your available tools from MCP server: {', '.join(tool_names)}
 """
             
-            # Get the LLM with tool calling
+            # Get the LLM with MCP tools bound
             llm_with_tools = self.llm.bind_tools(self.tools)
             
             # Create messages for the LLM
@@ -336,8 +486,8 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
         
         return state
     
-    async def _execute_tools(self, state: AgentState) -> AgentState:
-        """Execute tool calls from the agent."""
+    async def _execute_mcp_tools(self, state: AgentState) -> AgentState:
+        """Execute MCP tool calls from the agent."""
         try:
             last_message = state["messages"][-1]
             
@@ -345,24 +495,46 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
                 logger.warning("No tool calls found in last message")
                 return state
             
+            # Create a tool map for easy lookup
+            tool_map = {tool.name: tool for tool in self.tools if hasattr(tool, 'name')}
+            
             # Execute each tool call
             for tool_call in last_message.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
                 tool_id = tool_call["id"]
                 
-                logger.info("Executing tool", tool_name=tool_name, args=str(tool_args)[:100])
+                # Enhanced logging with full arguments
+                logger.info("=== EXECUTING TOOL CALL ===", 
+                           tool_name=tool_name, 
+                           tool_id=tool_id)
                 
-                if tool_name in self.tool_map:
-                    tool = self.tool_map[tool_name]
+                # Log the complete arguments in a readable format
+                print(f"\n🔧 TOOL CALL: {tool_name}")
+                print(f"📋 TOOL ID: {tool_id}")
+                print(f"📝 FULL ARGUMENTS:")
+                try:
+                    import json
+                    formatted_args = json.dumps(tool_args, indent=2, ensure_ascii=False)
+                    print(formatted_args)
+                except Exception as json_err:
+                    print(f"Raw args (JSON formatting failed): {tool_args}")
+                print(f"{'='*50}")
+                
+                logger.info("Tool arguments logged", 
+                           tool_name=tool_name,
+                           args_preview=str(tool_args)[:200] + "..." if len(str(tool_args)) > 200 else str(tool_args))
+                
+                if tool_name in tool_map:
+                    tool = tool_map[tool_name]
                     try:
-                        # Execute the tool
+                        # Execute the MCP tool
                         if hasattr(tool, 'ainvoke'):
                             result = await tool.ainvoke(tool_args)
-                        elif asyncio.iscoroutinefunction(tool.func):
-                            result = await tool.func(**tool_args)
+                        elif hasattr(tool, 'invoke'):
+                            result = tool.invoke(tool_args)
                         else:
-                            result = tool.func(**tool_args)
+                            result = f"Tool {tool_name} is not properly callable"
                         
                         # Add tool message
                         tool_message = ToolMessage(
@@ -372,15 +544,31 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
                         )
                         state["messages"].append(tool_message)
                         
-                        logger.info("Tool executed successfully", 
+                        logger.info("MCP tool executed successfully", 
                                    tool_name=tool_name, 
                                    result_preview=str(result)[:200])
                         
+                        # Print full result for debugging with enhanced formatting
+                        print(f"\n✅ TOOL EXECUTION SUCCESS: {tool_name}")
+                        print(f"📋 TOOL ID: {tool_id}")
+                        print(f"📤 RESULT:")
+                        print(f"{'='*50}")
+                        print(str(result))
+                        print(f"{'='*50}")
+                        print(f"📊 RESULT LENGTH: {len(str(result))} characters")
+                        print("✨ TOOL EXECUTION COMPLETE\n")
+                        
                     except Exception as e:
-                        error_msg = f"Tool {tool_name} failed: {str(e)}"
-                        logger.error("Tool execution failed", 
+                        error_msg = f"MCP tool {tool_name} failed: {str(e)}"
+                        logger.error("MCP tool execution failed", 
                                    tool_name=tool_name, 
                                    error=str(e))
+                        
+                        # Enhanced error logging
+                        print(f"\n❌ TOOL EXECUTION FAILED: {tool_name}")
+                        print(f"📋 TOOL ID: {tool_id}")
+                        print(f"❗ ERROR: {str(e)}")
+                        print(f"{'='*50}")
                         
                         tool_message = ToolMessage(
                             content=error_msg,
@@ -389,8 +577,14 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
                         )
                         state["messages"].append(tool_message)
                 else:
-                    error_msg = f"Unknown tool: {tool_name}"
-                    logger.error("Unknown tool requested", tool_name=tool_name)
+                    error_msg = f"Unknown MCP tool: {tool_name}"
+                    logger.error("Unknown MCP tool requested", tool_name=tool_name)
+                    
+                    # Enhanced unknown tool logging
+                    print(f"\n⚠️  UNKNOWN TOOL REQUESTED: {tool_name}")
+                    print(f"📋 TOOL ID: {tool_id}")
+                    print(f"🔍 AVAILABLE TOOLS: {list(tool_map.keys())}")
+                    print(f"{'='*50}")
                     
                     tool_message = ToolMessage(
                         content=error_msg,
@@ -400,8 +594,8 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
                     state["messages"].append(tool_message)
             
         except Exception as e:
-            logger.error("Tool execution node failed", error=str(e))
-            state["error"] = f"Tool execution failed: {str(e)}"
+            logger.error("MCP tool execution node failed", error=str(e))
+            state["error"] = f"MCP tool execution failed: {str(e)}"
         
         return state
     
@@ -415,6 +609,11 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
         # If the last message has tool calls, continue with tools
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             return "continue"
+        
+        # Check for query results that need CSV processing
+        tool_messages = [msg for msg in state["messages"] if isinstance(msg, ToolMessage)]
+        if tool_messages and any("data" in str(msg.content).lower() for msg in tool_messages):
+            return "process"
         
         # If we have data from execute_query, process results
         if any("SUCCESS: Created" in str(msg.content) for msg in state["messages"] 
@@ -506,6 +705,9 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
             
             # Check for generated CSV files
             csv_files = self._find_generated_files()
+            logger.info("CSV file search results", 
+                       csv_files_found=len(csv_files),
+                       csv_files=csv_files if csv_files else "No CSV files found")
             
             processing_result = final_state.get("processing_result")
             
@@ -539,23 +741,50 @@ Available tools: list_tables, describe_table, execute_query, save_as_csv
         """Find recently created CSV files."""
         try:
             temp_dir = settings.temp_file_path
+            logger.info("Searching for CSV files", temp_dir=temp_dir)
+            
             if not os.path.exists(temp_dir):
+                logger.warning("Temp directory does not exist", temp_dir=temp_dir)
                 return []
             
             files = []
             cutoff = datetime.now().timestamp() - 300  # 5 minutes ago
             
-            for filename in os.listdir(temp_dir):
+            # List all files in directory
+            all_files = os.listdir(temp_dir)
+            logger.info("Found files in temp dir", 
+                       file_count=len(all_files),
+                       files=all_files[:10])  # Log first 10 files
+            
+            csv_files = []
+            for filename in all_files:
                 if filename.endswith('.csv'):
                     filepath = os.path.join(temp_dir, filename)
-                    if os.path.getmtime(filepath) > cutoff:
-                        files.append({
+                    mtime = os.path.getmtime(filepath)
+                    size = os.path.getsize(filepath)
+                    
+                    if mtime > cutoff:
+                        csv_files.append({
                             "filepath": filepath,
                             "filename": filename,
-                            "size": os.path.getsize(filepath)
+                            "size": size,
+                            "mtime": mtime
                         })
+                        logger.info("Found matching CSV file",
+                                  filename=filename,
+                                  size=size,
+                                  mtime=datetime.fromtimestamp(mtime).isoformat())
             
-            return files
+            if not csv_files:
+                logger.warning("No matching CSV files found", 
+                             temp_dir=temp_dir,
+                             cutoff_time=datetime.fromtimestamp(cutoff).isoformat())
+            else:
+                logger.info("Found CSV files",
+                          count=len(csv_files),
+                          files=[f["filename"] for f in csv_files])
+            
+            return csv_files
             
         except Exception as e:
             logger.error("Failed to find generated files", error=str(e))
@@ -567,10 +796,12 @@ _react_agent: Optional[LangGraphReActAgent] = None
 
 
 async def get_langgraph_react_agent() -> LangGraphReActAgent:
-    """Get or create LangGraph ReAct agent."""
+    """Get or create LangGraph ReAct agent with MCP initialization."""
     global _react_agent
     
     if _react_agent is None:
         _react_agent = LangGraphReActAgent()
+        # Initialize MCP client and tools
+        await _react_agent.initialize()
     
     return _react_agent

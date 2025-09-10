@@ -36,6 +36,9 @@ def main():
         print(f"\n❌ OptiBot failed to start: {e}")
         logger.error(f"OptiBot startup failed: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        print("✅ OptiBot stopped")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

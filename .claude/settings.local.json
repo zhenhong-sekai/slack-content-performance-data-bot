@@ -11,7 +11,8 @@
       "WebFetch(domain:langchain-ai.github.io)",
       "Bash(pkill:*)",
       "Bash(python3:*)",
-      "Read(/private/tmp/slack_bot_files/**)"
+      "Read(/private/tmp/slack_bot_files/**)",
+      "WebFetch(domain:api.slack.com)"
     ],
     "deny": [],
     "ask": []

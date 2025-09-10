@@ -1,0 +1,36 @@
+# Simple Dockerfile for Socket Mode only
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create application directory
+WORKDIR /app
+
+# Copy requirements and install dependencies
+COPY requirements-simple.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Create necessary directories
+RUN mkdir -p /app/temp_files /app/logs
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Run the simple socket worker directly
+CMD ["python", "run-simple.py"]

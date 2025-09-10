@@ -1,0 +1,73 @@
+{
+  "family": "optibot-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "containerDefinitions": [
+    {
+      "name": "optibot",
+      "image": "${ECR_REPOSITORY_URI}:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "DEBUG",
+          "value": "false"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "INFO"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "SLACK_BOT_TOKEN",
+          "valueFrom": "${SLACK_BOT_TOKEN_ARN}"
+        },
+        {
+          "name": "SLACK_APP_TOKEN",
+          "valueFrom": "${SLACK_APP_TOKEN_ARN}"
+        },
+        {
+          "name": "SLACK_SIGNING_SECRET",
+          "valueFrom": "${SLACK_SIGNING_SECRET_ARN}"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "${OPENAI_API_KEY_ARN}"
+        },
+        {
+          "name": "MCP_SERVER_URL",
+          "valueFrom": "${MCP_SERVER_URL_ARN}"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/optibot",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ],
+  "executionRoleArn": "${ECS_EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${ECS_TASK_ROLE_ARN}"
+}
